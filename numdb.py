@@ -67,7 +67,8 @@ def test():
     print 'select', table2.select(
             { 
               'id'   : 'id', 
-              'sin_s3': (numpy.sin, 's3')
+              'sin_s3': (numpy.sin, 's3'),
+              'newid': (NewColumn, numpy.arange(len(table2))),
             }, 
             where=table2['id'] != 3)
 
@@ -209,14 +210,21 @@ def resolve_name_conflict(data, name):
         c_ = c_ + "_"
     return c_
 
+def NewColumn(x):
+    """ A special function used by select to create a new column. """
+    return x
+
 class NumTable(object):
     """ A relational data table based on numpy array.
 
 
         Parameters
         ----------
-        array:  ndarray
-            
+        data :  dict or ndarray
+            the input data
+        specs : 
+            How the index is built.
+
     """
 
     def __init__(self, data, specs=None):
@@ -229,10 +237,15 @@ class NumTable(object):
     def __getitem__(self, columns):
         return self.data.toarray(columns)
 
+    def __len__(self):
+        return len(self.data)
+
     def append_columns(self, data):
         """ Append columns from data.
             
             I hope this is not used very often.
+
+            select ({'column' : (NewColumn, data))
         """
         self.data = NumData.concatenate((self.data, NumData(data)))
  
@@ -260,7 +273,12 @@ class NumTable(object):
                 be indexed by where.
                 
             columns : 
-                Columns to select. To rename, use a dict of {newname : oldname} 
+                Columns to select. A list, tuple or set will select.
+
+                - To rename, use a dict of {newname : oldname}.
+                - To apply functions, use a dict of {name : (func, oldname)}.
+                - To create columns, use a dict of {name : (NewColumn, data)}. 
+                  data[where] is applied to the column.
                     
             Returns
             -------
@@ -277,7 +295,10 @@ class NumTable(object):
         for asc, c in columns.items():
             if hasattr(c[0], "__call__"):
                 ufunc, c = c
-                d = ufunc(self.data[c][where])
+                if ufunc is NewColumn:
+                    d = ufunc(c[where])
+                else:
+                    d = ufunc(self.data[c][where])
             else:
                 d = self.data[c][where]
             data[asc] = d
