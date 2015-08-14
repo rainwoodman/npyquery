@@ -4,6 +4,14 @@ Numpy Database
 """
     
 # here are a few examples
+class mean:
+    @staticmethod
+    def reduceat(array, offset, axis=0):
+        sum = numpy.add.reduceat(array, offset, axis)
+        N = numpy.empty_like(sum)
+        N[:-1] = offset[1:] - offset[:-1]
+        N[-1] = len(array) - offset[-1]
+        return sum / N
 
 def test():
     dtype = numpy.dtype(
@@ -44,18 +52,39 @@ def test():
 
     print 'table', table
     print 'table2', table2
+
+    # these are fast find methods on indexed columns
+    # need a way to expose these methods
     print 'findall', table2.indices['s3'].findall(2)
     print 'find', table2.indices['s3'].find(2)
-    print 'select', table2.select(['id', 's3'], where=table2['id'] != 3)
 
+    # mimic SQL select.
+    print 'select', table2.select(
+            ('id',),
+            where=table2['id'] != 3)
+
+    # renaming of column and functions
+    print 'select', table2.select(
+            { 
+              'id'   : 'id', 
+              'sin_s3': (numpy.sin, 's3')
+            }, 
+            where=table2['id'] != 3)
+
+    # inner join
     j = table.join(table2, on='id', on_other='id2')
     print 'join', j
 
+    # left join
     j = table.join(table2, on='id', on_other='id2', mode=JoinMode.Left)
     print 'left join', j
 
+    # group by
     print 'groupby', table.groupby('s1', 
-            {'s1' : (numpy.add, table['s1'])})
+            {'sum'  : (numpy.add, table['s1']),
+             'max'  : (numpy.maximum, table['s1']),
+             'mean' : (mean, table['s1']),
+            })
 
 import numpy
 import warnings
@@ -231,8 +260,7 @@ class NumTable(object):
                 be indexed by where.
                 
             columns : 
-                Columns to select. To rename, use a dict, where 
-                value is the new name.
+                Columns to select. To rename, use a dict of {newname : oldname} 
                     
             Returns
             -------
@@ -245,7 +273,14 @@ class NumTable(object):
         columns = ensure_dict(columns)        
         if where is None:
             where = Ellipsis
-        data = dict([(asc, self.data[c][where]) for c, asc in columns.items()])
+        data = {}
+        for asc, c in columns.items():
+            if hasattr(c[0], "__call__"):
+                ufunc, c = c
+                d = ufunc(self.data[c][where])
+            else:
+                d = self.data[c][where]
+            data[asc] = d
         return NumTable(data) 
 
     def join(self, other, on, on_other=None, columns=None, other_columns=None, 
@@ -262,8 +297,7 @@ class NumTable(object):
             on_other :
                 The corresponding columns in 'other' table, if different from on.
             columns :
-                Columns to select from self. To rename, use a dict, where the value is
-                the new column name.
+                Columns to select from self. To rename, use a dict of {newname, oldname}.
             others_column :
                 Columns to select from other. 
             notfound_column : string
@@ -327,10 +361,10 @@ class NumTable(object):
             data[notfound_column] = notfound 
             where = Ellipsis
 
-        for c, asc in columns.items():
+        for asc, c in columns.items():
             data[asc] = self.data[c][where]
 
-        for c, asc in other_columns.items():
+        for asc, c in other_columns.items():
             # FIXME: skip on_other
             # if c in on_other: continue
             #
@@ -350,8 +384,9 @@ class NumTable(object):
             aggregations: dict
                 Mapping in form of {column : (ufunc, data)}
 
-                Reduce ufunc for each group on data, the result is 
-                stored as column.
+                Call ufunc.reduceat for each group on data, the result is 
+                stored as column. Any object with a reduceat interface
+                can be used here.
             
             Returns
             -------
@@ -384,19 +419,18 @@ class NumTable(object):
         return NumTable(data)
 
     def __repr__(self):
-        s = ("<NumTable Object at 0x%X>" % id(self)
-            + " %d Rows" % len(self.data)
-            +   "\n%d Columns :\n" % len(self.data)
+        s = ("<NumTable Object at 0x%X>\n" % id(self)
+            + "- %d Rows" % len(self.data)
+            +   " %d Columns :\n" % len(self.data)
             +
                     '\n'.join(['  %s : %s : %s ...' % 
                         (key, str(self.data.dtype(key)), str(self.data[key][:8]).strip()[:-1]) for key in self.data])
             )
         if len(self.indices):
-            s += "\nIndices:\n"
+            s += "\n- Indices:\n"
             s +=  '\n'.join(['  %s : %s' % 
                         (str(key), str(ind.spec)) for key, ind in self.indices.items()])
-        else:
-            s += "\nNo indices\n"
+
         return s
 
 class Index(object):
