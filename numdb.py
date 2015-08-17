@@ -555,7 +555,7 @@ class Index(object):
 
     def groupby(self, aggregations):
         mask = numpy.empty(len(self.sorteddata), '?')
-        mask[0] = False
+        mask[0] = True
         mask[1:] = self.sorteddata[1:] != self.sorteddata[:-1]
         offsets = numpy.nonzero(mask)[0]
 
