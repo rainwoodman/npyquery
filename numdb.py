@@ -139,7 +139,7 @@ class NumData(object):
         elif isinstance(data, (tuple, list, set)):
             self = NumData.concatenate([
                 NumData(item) for item in data
-                ])
+                ], rename=True)
         return self
 
     def dtype(self, key):
@@ -155,6 +155,9 @@ class NumData(object):
         
     def __iter__(self):
         return iter(self.base)
+
+    def columns(self):
+        return self.base.items()
 
     def __contains__(self, columns):
         if not isinstance(columns, (tuple, list)):
@@ -184,9 +187,16 @@ class NumData(object):
         
 
     @classmethod
-    def concatenate(kls, list):
-        data = dict(
-            [(key, item[key]) for item in list for key in item])
+    def concatenate(kls, list, rename=True):
+        data = {}
+        for item in list:
+            for key in item:
+                if rename:
+                    key = resolve_name_conflict(data, key)
+                else:
+                    if key in data:
+                        raise KeyError("Column `%s` already exist" % str(key))
+                data[key] = item[key]
         return NumData(data) 
 
 def ensure_tuple(columns):
@@ -206,8 +216,10 @@ def ensure_dict(columns):
 
 def resolve_name_conflict(data, name):
     c_ = name
+    i = 1
     while c_ in data:
-        c_ = c_ + "_"
+        c_ = name + ("_%d" % i)
+        i = i + 1
     return c_
 
 def NewColumn(x):
@@ -222,17 +234,24 @@ class NumTable(object):
         ----------
         data :  dict or ndarray
             the input data
+
         specs : 
             How the index is built.
 
+        add_id : string
+            Append a unique ID column to the data. 
+            Parameter is the name of the ID field. 
     """
 
-    def __init__(self, data, specs=None):
+    def __init__(self, data, specs=None, add_id=None):
         self.indices = {}
         self.specs = {}
         self.data = NumData(data)
         if specs is not None:
             self.update_indices(specs)
+        if add_id is not None:
+            self.append_columns(
+                {add_id : numpy.arange(len(self))})
 
     def __getitem__(self, columns):
         return self.data.toarray(columns)
@@ -247,7 +266,7 @@ class NumTable(object):
 
             select ({'column' : (NewColumn, data))
         """
-        self.data = NumData.concatenate((self.data, NumData(data)))
+        self.data = NumData.concatenate((self.data, NumData(data)), rename=False)
  
     def update_indices(self, specs):
         specs = dict([
@@ -291,6 +310,9 @@ class NumTable(object):
         columns = ensure_dict(columns)        
         if where is None:
             where = Ellipsis
+        elif hasattr(where, "__call__"):
+            where = where(self)
+
         data = {}
         for asc, c in columns.items():
             if hasattr(c[0], "__call__"):
@@ -426,6 +448,7 @@ class NumTable(object):
         for c, a in aggregations.items():
             agg.append(a)
             columns.append(c)
+
         offset, result = i2.groupby(agg)
 
         # prepare the output 
@@ -442,7 +465,7 @@ class NumTable(object):
     def __repr__(self):
         s = ("<NumTable Object at 0x%X>\n" % id(self)
             + "- %d Rows" % len(self.data)
-            +   " %d Columns :\n" % len(self.data)
+            +   " %d Columns :\n" % len(self.data.columns())
             +
                     '\n'.join(['  %s : %s : %s ...' % 
                         (key, str(self.data.dtype(key)), str(self.data[key][:8]).strip()[:-1]) for key in self.data])
@@ -478,6 +501,7 @@ class Index(object):
         self.indices = numpy.arange(len(data_arr), dtype=itype)
 
         self.indices = self.indices[arg]
+        self.arg = arg
         data_arr = data_arr[arg]
         self.sorteddata = data_arr
         if spec & Unique:
@@ -559,9 +583,11 @@ class Index(object):
         mask[1:] = self.sorteddata[1:] != self.sorteddata[:-1]
         offsets = numpy.nonzero(mask)[0]
 
-        result = [ ufunc.reduceat(a, offsets, axis=0)
-                    for ufunc, a in aggregations]
-        return offsets, result
+        result = []
+        for ufunc, a in aggregations:
+            r = ufunc.reduceat(a[self.arg], offsets, axis=0)
+            result.append(r)
+        return self.indices[offsets], result
 
 if __name__ == '__main__':
     test()
