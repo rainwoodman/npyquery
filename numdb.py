@@ -3,92 +3,230 @@ Numpy Database
 
 """
     
-# here are a few examples
-class mean:
-    @staticmethod
-    def reduceat(array, offset, axis=0):
-        sum = numpy.add.reduceat(array, offset, axis)
-        N = numpy.empty_like(sum)
-        N[:-1] = offset[1:] - offset[:-1]
-        N[-1] = len(array) - offset[-1]
-        return sum / N
+class TestSuite:
+    def setup(self):
 
-def test():
-    dtype = numpy.dtype(
-        [('id', 'i8'),
-         ('s1', 'f4'),
-        ])
+        dtype = numpy.dtype(
+            [('id', 'i8'),
+             ('s', 'f4'),
+             ('d', 'f8'),
+            ])
 
-    dtype2 = numpy.dtype(
-        [('id', 'i8'),
-         ('id2', 'i4'),
-         ('s3', 'f4'),
-        ])
+        dtype2 = numpy.dtype(
+            [('id', 'i8'),
+             ('s', 'f4'),
+            ])
 
-    data = numpy.empty(5, dtype=dtype)
-    data2 = numpy.empty(5, dtype=dtype2)
+        data = numpy.empty(5, dtype=dtype)
+        data2 = numpy.empty(5, dtype=dtype2)
 
-    for column in data.dtype.fields:
-        data[column].flat[:] = numpy.arange(data[column].size)
+        for column in data.dtype.fields:
+            data[column].flat[:] = numpy.arange(data[column].size)[::-1]
 
-    for column in data2.dtype.fields:
-        data2[column].flat[:] = numpy.arange(data2[column].size)
-    data['s1'][2] = 1.0
-    data2['id2'][2] = 10
+        for column in data2.dtype.fields:
+            data2[column].flat[:] = numpy.arange(data2[column].size)[::-1]
 
-    table = NumTable(
-                data=data,
-                specs={'id': Unique | Indexed,
-                's1' :  Indexed,
-                },
-            )
-    table2 = NumTable(
-                data=data2,
-                specs={
-                'id' : Unique | Indexed,
-                's3' : Indexed,
-                }
+        data['d'][:] = numpy.floor(data['d'] * 0.5)
+        data2['s'][2] = 10
+
+        self.data = data
+        self.data2 = data2
+
+        self.table = NumTable(data=self.data)
+
+        self.table2 = NumTable(data=self.data2)
+
+    def test_new_indices(self):
+        table = NumTable(data=self.data, specs=
+                {'id' : Unique | Indexed })
+        table.indices['id']
+
+    def test_index(self):
+        table2 = NumTable(data=self.data2, specs=
+                {'s' : Unique | Indexed })
+
+        # these are fast find methods on indexed columns
+        # need a way to expose these methods
+        i3 = table2.indices['s']
+
+        all = table2.indices['s'].findall(3) 
+
+        first = table2.indices['s'].find(3)
+
+        assert (self.data2['s'][all] == 3).all()
+        assert all[0] == first
+
+    def test_select_single_column(self):
+        table2 = self.table2
+
+        where = table2['id'] != 3
+
+        # mimic SQL select.
+        sel = table2.select('id',
+                    where=where)
+        assert len(sel.columns()) == 1
+
+        sel2 = table2.select(('id',), where)
+
+        assert len(sel2.columns()) == 1
+
+        sel3 = table2.select(C('id'), where)
+
+        assert len(sel3.columns()) == 1
+    
+    def test_select_many_columns(self):
+        table2 = self.table2
+
+        where= table2['id'] != 3
+
+        # mimic SQL select.
+        sel = table2.select(('id', 's'),
+                    where=where)
+        assert len(sel.columns()) == 2
+
+        sel2 = table2.select(C('id', 's'), where)
+
+        assert len(sel2.columns()) == 2
+
+        sel3 = table2.select(C('id', s2='s'), where)
+
+        assert len(sel3.columns()) == 2
+        assert 's2' in sel3
+        assert 'id' in sel3
+
+    def test_fancy_select(self):
+ 
+        table2 = self.table2
+
+        sel = table2.select(
+                columns=C(
+                  'id',  
+                  sin_s=(numpy.sin, 's'),
+                  newid=(NewColumn, numpy.arange(table2.size))),
                 )
+        assert 'sin_s' in sel
+        assert 'newid' in sel
+        assert 'id' in sel
 
-    print 'table', table
-    print 'table2', table2
+    def test_join_inner(self):
 
-    # these are fast find methods on indexed columns
-    # need a way to expose these methods
-    print 'findall', table2.indices['s3'].findall(2)
-    print 'find', table2.indices['s3'].find(2)
+        table = self.table
+        table2 = self.table2
 
-    # mimic SQL select.
-    print 'select', table2.select(
-            ('id',),
-            where=table2['id'] != 3)
+        # inner join
+        ij = table.join(table2, 
+                on='id', 
+                other_columns=C(s2='s'),
+                mode=Inner)
 
-    # renaming of column and functions
-    print 'select', table2.select(
-            { 
-              'id'   : 'id', 
-              'sin_s3': (numpy.sin, 's3'),
-              'newid': (NewColumn, numpy.arange(len(table2))),
-            }, 
-            where=table2['id'] != 3)
+        assert 'id1' not in ij
+        assert 'id' in ij
 
-    # inner join
-    j = table.join(table2, on='id', on_other='id2')
-    print 'join', j
+    def test_join_left(self):
 
-    # left join
-    j = table.join(table2, on='id', on_other='id2', mode=JoinMode.Left)
-    print 'left join', j
+        table = self.table
+        table2 = self.table2
 
-    # group by
-    print 'groupby', table.groupby('s1', 
-            {'sum'  : (numpy.add, table['s1']),
-             'max'  : (numpy.maximum, table['s1']),
-             'mean' : (mean, table['s1']),
-            })
+        # inner join
+        ij = table.join(table2, 
+                on='id', 
+                other_columns=C(s2='s'),
+                mode=Inner)
+
+        assert 'id1' not in ij
+        assert 'id' in ij
+
+    def test_groupby(self):
+
+        table = self.table
+        groupby = table.groupby('d', 
+                {'sum'  : (sum, table['s']),
+                 'count'  : (count, table['s']),
+                 'max'  : (max, table['s']),
+                 'min'  : (min, table['s']),
+                 'first'  : (first, table['s']),
+                 'last'  : (last, table['s']),
+                 'mean' : (avg, table['s']),
+                })
+
+        assert groupby.size == len(numpy.unique(table['d']))
+        assert numpy.allclose(groupby['mean'] * groupby['count'], groupby['sum'])
+        assert numpy.all(groupby['min'] <= groupby['max'])
+
+        # FIXME: test first last min max
 
 import numpy
 import warnings
+
+# Constants
+
+def Aggregations():
+    """ Aggregation operators. """
+
+    min = minimum = numpy.minimum.reduceat
+    max = maximum = numpy.maximum.reduceat
+    sum = numpy.add.reduceat
+
+    def avg(array, offset, axis):
+        s = sum(array, offset, axis)
+        N = count(array, offset, axis)
+        return s / (N * 1.0)
+
+    mean = average = avg 
+
+    def count(array, offset, axis):
+        """ Count the number of rows returned. 
+
+            FIXME: Is this DISTINCT? """
+        N = numpy.empty_like(offset)
+        N[:-1] = offset[1:] - offset[:-1]
+        N[-1] = len(array) - offset[-1]
+        return N
+
+    def var(array, offset, axis):
+        """ Variance """
+        xbar = mean(array, offset, axis)
+        x2bar = mean(array ** 2, offset, axis)
+        return (x2bar - xbar ** 2)
+
+    def std(array, offset, axis):
+        """ Standard deviation"""
+        var = var(array, offset, axis)
+        N = count(array, offset, axis)
+        return var / N
+
+    def first(array, offset, axis):
+        """ First item 
+        
+            Note: will give wrong results if some chunks
+            are of length 0
+        """
+        return array[offset]
+
+    def last(array, offset, axis):
+        """ Last item. 
+
+            Note: will give wrong results if some chunks
+            are of length 0
+        """
+        offset2 = numpy.empty_like(offset)
+        offset2[:-1] = offset[1:] - 1
+        offset2[-1] = len(array) - 1
+        return array[offset2]
+
+    globals().update(locals())
+
+    return locals()
+
+# replace Aggregations with an object, for easy access of the
+# aggregators
+
+Aggregations = type('Aggregations', 
+                    (object,), 
+                    {'__init__' : 
+                        lambda self, d: self.__dict__.update(d),
+                     '__doc__' : 'Namespace of aggregation functions.'
+                    })(Aggregations())
 
 class IndexSpec(int): 
     def __str__(self):
@@ -110,15 +248,46 @@ class IndexSpec(int):
         return IndexSpec(int(self) | int(other))
 
 Indexed = IndexSpec.Indexed = IndexSpec(2)
-Unique = IndexSpec.Unique = IndexSpec(4)
+Unique  = IndexSpec.Unique  = IndexSpec(4)
 
 class JoinMode(int): 
-    pass
-JoinMode.Inner = JoinMode(0)
-JoinMode.Left = JoinMode(1)
-JoinMode.Right = JoinMode(2)
-JoinMode.Outer = JoinMode(3)
+    """ Modes for the join operation """
+    def __str__(self):
+        return repr(self)
+    def __repr__(self):
+        for key, value in JoinMode.__dict__.items():
+            if not isinstance(value, JoinMode): continue
+            if value == self: return key
 
+Inner = JoinMode.Inner = JoinMode(0)
+Left  = JoinMode.Left  = JoinMode(1)
+Right = JoinMode.Right = JoinMode(2)
+Outer = JoinMode.Outer = JoinMode(3)
+
+def NewColumn(x):
+    """ A special function used by select to create a new column. """
+    return x
+
+def C(*args, **kwargs):
+    """ Build a list of columns from positional and keyword arguments.
+
+        Examples
+        --------
+
+        >>> C('HaloID', 'SubHaloID', 'Mass', LogMass=(numpy.log10, 'Mass'))
+
+        Returns
+        -------
+        dict :
+            a dictionary of suitable to be used as input to the columns arguments.
+    """
+    d = {}
+    for w in args:
+        d[w] = w
+
+    d.update(kwargs)
+    return d
+    
 class NumData(object):
     """ A collection of ndarrays, with identical length. """
     def __new__(kls, data):
@@ -130,17 +299,23 @@ class NumData(object):
                 if n != N[0]:
                     raise ValueError("Array length mismatch")
             self.size = N[0]
+            return self
         elif isinstance(data, numpy.ndarray):
             d = dict([
                 (key, data[key]) for key in data.dtype.fields])
             return NumData(d)            
         elif isinstance(data, NumData):
             return NumData(data.base)
-        elif isinstance(data, (tuple, list, set)):
-            self = NumData.concatenate([
-                NumData(item) for item in data
-                ], rename=True)
-        return self
+        elif isinstance(data, list):
+            d = {}
+            for key, value in data:
+                if key not in d:
+                    d[key] = value
+                else:
+                    raise KeyError("Column `%s` already exist" % str(key))
+            return NumData(d)
+
+        raise TypeError("Unsupported type `%s` for NumData" % str(type(data)))
 
     def dtype(self, key):
         shape = self[key].shape
@@ -151,7 +326,7 @@ class NumData(object):
             return numpy.dtype((base, shape[1:]))
 
     def __len__(self):
-        return self.size
+        raise MethodError("len is ill defined. Use .size for number of rows.")
         
     def __iter__(self):
         return iter(self.base)
@@ -175,7 +350,7 @@ class NumData(object):
             return self.base[columns]
         else:
             dtype = [(c, self.dtype(c)) for c in columns]
-            data = numpy.empty(len(self), dtype)
+            data = numpy.empty(self.size, dtype)
             for column in columns:
                 data[column][...] = self[column]
         return data
@@ -185,46 +360,16 @@ class NumData(object):
             raise KeyError('Column `%s` not found' % str(column))
         return self.base[column]
         
+    def __setitem__(self, columns, value):
+        raise RuntimeError('NumData is immutable. Create a new object with NumData.concatenate.')
 
     @classmethod
-    def concatenate(kls, list, rename=True):
-        data = {}
+    def concatenate(kls, list):
+        data = []
         for item in list:
             for key in item:
-                if rename:
-                    key = resolve_name_conflict(data, key)
-                else:
-                    if key in data:
-                        raise KeyError("Column `%s` already exist" % str(key))
-                data[key] = item[key]
+                data.append((key, item[key]))
         return NumData(data) 
-
-def ensure_tuple(columns):
-    if not isinstance(columns, (tuple, list, set)):
-        columns = (columns, )
-    else:
-        columns = tuple(columns)
-    return columns        
-
-def ensure_dict(columns):
-    if isinstance(columns, dict):
-        return columns
-    columns = ensure_tuple(columns)
-    columns = dict(
-        [(c, c) for c in columns])
-    return columns        
-
-def resolve_name_conflict(data, name):
-    c_ = name
-    i = 1
-    while c_ in data:
-        c_ = name + ("_%d" % i)
-        i = i + 1
-    return c_
-
-def NewColumn(x):
-    """ A special function used by select to create a new column. """
-    return x
 
 class NumTable(object):
     """ A relational data table based on numpy array.
@@ -257,7 +402,17 @@ class NumTable(object):
         return self.data.toarray(columns)
 
     def __len__(self):
-        return len(self.data)
+        raise MethodError("len is ill defined. Use .size for number of rows.")
+
+    @property
+    def size(self):
+        return self.data.size
+
+    def __contains__(self, key):
+        return key in self.data
+
+    def columns(self):
+        return self.data.columns()
 
     def append_columns(self, data):
         """ Append columns from data.
@@ -292,7 +447,7 @@ class NumTable(object):
                 be indexed by where.
                 
             columns : 
-                Columns to select. A list, tuple or set will select.
+                Columns to select. Constructed with :py:func:`C`.
 
                 - To rename, use a dict of {newname : oldname}.
                 - To apply functions, use a dict of {name : (func, oldname)}.
@@ -326,7 +481,7 @@ class NumTable(object):
             data[asc] = d
         return NumTable(data) 
 
-    def join(self, other, on, on_other=None, columns=None, other_columns=None, 
+    def join(self, other, on, other_on=None, columns=None, other_columns=None, 
             mode=JoinMode.Inner,
             notfound_column="@NA"):
         """ Left join of two tables by 'on'. 
@@ -337,11 +492,11 @@ class NumTable(object):
                 The right side of the Join operator. 
             on    : 
                 Column(s) to join
-            on_other :
+            other_on :
                 The corresponding columns in 'other' table, if different from on.
             columns :
                 Columns to select from self. To rename, use a dict of {newname, oldname}.
-            others_column :
+            other_columns :
                 Columns to select from other. 
             notfound_column : string
                 Column to store the not found flag. (True for items that do not exist
@@ -368,12 +523,12 @@ class NumTable(object):
         """
         on = ensure_tuple(on)
 
-        if on_other is None:
-            on_other = on
+        if other_on is None:
+            other_on = on
         if columns is None: columns = tuple(iter(self.data))
         if other_columns is None: other_columns = tuple(iter(other.data))
 
-        on_other = ensure_tuple(on_other)
+        other_on = ensure_tuple(other_on)
         columns = ensure_dict(columns)
         other_columns = ensure_dict(other_columns)
 
@@ -384,16 +539,16 @@ class NumTable(object):
         if mode == JoinMode.Outer:
             raise NotImplemented
 
-        if on_other not in other.indices:
-            i2 = Index(other.data, on_other, Indexed)
+        if other_on not in other.indices:
+            i2 = Index(other.data, other_on, Indexed)
         else:
-            i2 = other.indices[on_other]
+            i2 = other.indices[other_on]
 
         # find the matching argindex in other
         arg, notfound = i2.findeach(self.data.toarray(on))
 
         # prepare the output 
-        data = {}
+        data = []
 
         if mode == JoinMode.Inner:
             where = ~notfound
@@ -401,19 +556,17 @@ class NumTable(object):
             # store the notfound field
             # because NULL is not a valid type in numpy
             # these rows will have some valid looking values.
-            data[notfound_column] = notfound 
+            data.append((notfound_column, notfound ))
             where = Ellipsis
 
         for asc, c in columns.items():
-            data[asc] = self.data[c][where]
+            data.append((asc, self.data[c][where]))
 
         for asc, c in other_columns.items():
-            # FIXME: skip on_other
-            # if c in on_other: continue
-            #
-            # append prime for conflicting names
-            c_ = resolve_name_conflict(data, asc)
-            data[c_] = (other.data[c][arg])[where]
+            # FIXME: skip other_on
+            if other_on == on and c in other_on: continue
+
+            data.append((asc, (other.data[c][arg])[where]))
 
         return NumTable(data)
 
@@ -424,13 +577,27 @@ class NumTable(object):
             ----------
             on : 
                 column(s) to group by
-            aggregations: dict
-                Mapping in form of {column : (ufunc, data)}
 
-                Call ufunc.reduceat for each group on data, the result is 
-                stored as column. Any object with a reduceat interface
-                can be used here.
+            aggregations: dict
+                Mapping in form of {column : (agg, data)}
+
+                Call aggregation for each group on data, the result is 
+                stored as column. The aggregation is a callable with
+                a signature of :py:code:`agg(array, offsets, axis)` that is
+                similar to :py:code:`numpy.ufunc.reduceat`. 
+                
+                Predefined Aggregations are listed in numdb.Aggregations.
             
+            Examples
+            --------
+
+            >>> table.groupby(
+                    on='Department', 
+                    aggregations={
+                        'TotalSales' : (numdb.sum, 'Sales'),
+                        'MaxSales' : (numdb.max, 'Sales'),
+                    })
+
             Returns
             -------
             NumTable
@@ -452,20 +619,19 @@ class NumTable(object):
         offset, result = i2.groupby(agg)
 
         # prepare the output 
-        data = {}
+        data = []
         for c in on:
-            data[c] = self.data[c][offset]
+            data.append((c, self.data[c][offset]))
 
         for c, r in zip(columns, result): 
-            c = resolve_name_conflict(data, c)
-            data[c] = r
+            data.append((c, r))
 
         return NumTable(data)
 
     def __repr__(self):
         s = ("<NumTable Object at 0x%X>\n" % id(self)
-            + "- %d Rows" % len(self.data)
-            +   " %d Columns :\n" % len(self.data.columns())
+            + "- %d Rows" % self.size
+            +   " %d Columns :\n" % len(self.columns())
             +
                     '\n'.join(['  %s : %s : %s ...' % 
                         (key, str(self.data.dtype(key)), str(self.data[key][:8]).strip()[:-1]) for key in self.data])
@@ -488,7 +654,7 @@ class Index(object):
             if len(data.dtype(column).shape) > 0:
                 warnings.warn("Non-scalar columns are indexed as bytes.")
 
-        if len(data) < numpy.iinfo(numpy.uint32).max:
+        if data.size < numpy.iinfo(numpy.uint32).max:
             itype = numpy.uint32
         else:
             itype = numpy.uint64
@@ -584,10 +750,34 @@ class Index(object):
         offsets = numpy.nonzero(mask)[0]
 
         result = []
-        for ufunc, a in aggregations:
-            r = ufunc.reduceat(a[self.arg], offsets, axis=0)
+        for agg, a in aggregations:
+            r = agg(a[self.arg], offsets, axis=0)
             result.append(r)
         return self.indices[offsets], result
 
-if __name__ == '__main__':
-    test()
+## ##
+#   Internal functions
+
+def ensure_tuple(columns):
+    if not isinstance(columns, (tuple, list, set)):
+        columns = (columns, )
+    else:
+        columns = tuple(columns)
+    return columns        
+
+def ensure_dict(columns):
+    if isinstance(columns, dict):
+        return columns
+    columns = ensure_tuple(columns)
+    columns = dict(
+        [(c, c) for c in columns])
+    return columns        
+
+def resolve_name_conflict(data, name):
+    c_ = name
+    i = 1
+    while c_ in data:
+        c_ = name + ("_%d" % i)
+        i = i + 1
+    return c_
+
