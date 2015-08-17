@@ -41,6 +41,9 @@ class TestSuite:
                 {'id' : Unique | Indexed })
         table.indices['id']
 
+    def test_add_id(self):
+        table = NumTable(data=self.data, add_id='id2')
+
     def test_index(self):
         table2 = NumTable(data=self.data2, specs=
                 {'s' : Unique | Indexed })
@@ -396,7 +399,7 @@ class NumTable(object):
             self.update_indices(specs)
         if add_id is not None:
             self.append_columns(
-                {add_id : numpy.arange(len(self))})
+                {add_id : numpy.arange(self.size)})
 
     def __getitem__(self, columns):
         return self.data.toarray(columns)
@@ -421,7 +424,7 @@ class NumTable(object):
 
             select ({'column' : (NewColumn, data))
         """
-        self.data = NumData.concatenate((self.data, NumData(data)), rename=False)
+        self.data = NumData.concatenate((self.data, NumData(data)))
  
     def update_indices(self, specs):
         specs = dict([
