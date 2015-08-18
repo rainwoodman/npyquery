@@ -109,6 +109,26 @@ class TestSuite:
         assert (self.data2['s'][all] == 3).all()
         assert all[0] == first
 
+    def test_sort(self):
+        table = self.table
+        tables = table.sort(orderby=('id'))
+        assert (tables['id'][1:] >= tables['id'][:-1]).all()
+
+        tables = table.sort(orderby=(('id', DESC),))
+        assert (tables['id'][1:] <= tables['id'][:-1]).all()
+
+        # these tests relies on the fact d is a monotonic function of id
+        #
+        tables = table.sort(orderby=(('d', DESC), ('id', ASC)))
+        assert (tables['d'][1:] <= tables['d'][:-1]).all()
+        mask = tables['d'][1:] != tables['d'][:-1]
+        mask2 = tables['id'][1:] < tables['id'][:-1]
+        assert (mask == mask2).all()
+
+        tables = table.sort(orderby=(('d', DESC), ('id', DESC)))
+        assert (tables['d'][1:] <= tables['d'][:-1]).all()
+        assert (tables['id'][1:] <= tables['id'][:-1]).all()
+
     def test_select_single_column(self):
         table2 = self.table2
 
@@ -317,6 +337,18 @@ Left  = JoinMode.Left  = JoinMode(1)
 Right = JoinMode.Right = JoinMode(2)
 Outer = JoinMode.Outer = JoinMode(3)
 
+class OrderDirection(int): 
+    """ Modes for the join operation """
+    def __str__(self):
+        return repr(self)
+    def __repr__(self):
+        for key, value in OrderDirection.__dict__.items():
+            if not isinstance(value, OrderDirection): continue
+            if value == self: return key
+
+ASC = OrderDirection.ASC = OrderDirection(-1)
+DESC = OrderDirection.ASC = OrderDirection(1)
+
 def NewColumn(x):
     """ A special function used by select to create a new column. """
     return x
@@ -508,7 +540,7 @@ class NumTable(object):
                 - To apply functions, use a dict of {name : (func, oldname)}.
                 - To create columns, use a dict of {name : (NewColumn, data)}. 
                   data[where] is applied to the column.
-                    
+
             Returns
             -------
             NumTable
@@ -523,7 +555,7 @@ class NumTable(object):
         elif hasattr(where, "__call__"):
             where = where(self)
 
-        data = {}
+        data = []
         for asc, c in columns.items():
             if hasattr(c[0], "__call__"):
                 ufunc, c = c
@@ -533,7 +565,52 @@ class NumTable(object):
                     d = ufunc(self.data[c][where])
             else:
                 d = self.data[c][where]
-            data[asc] = d
+            data.append((asc, d))
+
+        return NumTable(data) 
+
+    def sort(self, orderby):
+        """ 
+            Sort
+
+            Parameters
+            ----------
+            orderby : tuple
+                Sort the results by these columns. 
+                An entry in the tuple can be a pair tuple. The second
+                can be :py:code:`ASC` or :py:code:`DESC`.
+
+        """
+
+        orderby = ensure_tuple(orderby)
+
+        arg = Ellipsis
+
+        for key in orderby[::-1]:
+            if isinstance(key, tuple):
+                key, dir = key
+            else:
+                dir = ASC
+
+#            if dir == DESC:
+#                dir = slice(None, None, -1)
+#            elif dir == ASC:
+#                dir = Ellipsis
+
+            values = self.data[key][arg]
+            if dir == DESC:
+                values = -values
+            p = numpy.argsort(values, kind='mergesort')
+            if arg is not Ellipsis:
+                arg = arg[p]
+            else:
+                arg = p
+            print key, 1 * dir, values, p, arg
+
+        data = []
+        for key in self.data:
+            data.append((key, self.data[key][arg]))
+
         return NumTable(data) 
 
     def join(self, other, on, other_on=None, columns=None, other_columns=None, 
