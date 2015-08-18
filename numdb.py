@@ -44,6 +44,20 @@ class TestSuite:
     def test_add_id(self):
         table = NumTable(data=self.data, add_id='id2')
 
+    def test_toarray(self):
+        # elipisis is all
+        aall = self.table[...]
+        for key, value in self.table.columns():
+            assert (aall[key] == value).all()
+
+        # scale indexing has no column names
+        aid = self.table['id']
+        assert (aid == self.table['id']).all()
+
+        # tuple indexing has column names
+        aid2 = self.table[('id',)]
+        assert (aid2['id'] == self.table['id']).all()
+
     def test_index(self):
         table2 = NumTable(data=self.data2, specs=
                 {'s' : Unique | Indexed })
@@ -347,6 +361,8 @@ class NumData(object):
         return True 
 
     def toarray(self, columns):
+        if columns is Ellipsis:
+            columns = list(self.base.keys())
         if not isinstance(columns, (tuple, list)):
             if not columns in self.base:
                 raise KeyError('Column `%s` not found' % columns)
