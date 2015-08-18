@@ -1,5 +1,40 @@
 """
-Numpy Database
+Relational tables backed by in-memory numpy arrays
+
+numdb.py provides a simple interface to access immutable, dense, and structual array data
+as a relational table. The following relational operations are implemented:
+
+- Join, :py:meth:`numdb.NumTable.join`
+
+- Select, :py:meth:`numdb.NumTable.select`. The :code:`where` clause is supported by 'selectionlanguage.py' or 'npyquery.py'.
+
+- Groupby, :py:meth:`numdb.NumTable.groupby`
+
+Indices are build either on-demand, or pre-built via :py:meth:`numdb.NumTable.update_indices`.
+
+We need some examples. For now, read the TestSuite to grab a sense.
+
+Note that numdb.py supports vectors.
+
+Examples
+--------
+
+1. A query to find the central galaxy position and number of satellites of a halo
+
+>>> 
+>>> recentered = subhalo.groupby('HaloID', {
+                'Length'   : (numdb.max, subhalo['Length']), 
+                'NSubhalo' : (numdb.count, subhalo['Length']),
+               }) \
+             .join(subhalo, on=('HaloID', 'Length')) \
+             .join(fof, on='HaloID',
+                    columns=numdb.C('NSubhalo', 
+                                CentralID='SubHaloID', 
+                          CentralPosition='Position'), 
+                    other_columns=numdb.C('Length', 
+                               MassCenter='Position'))
+
+>>> Fixme: write some examples
 
 """
     
@@ -15,6 +50,7 @@ class TestSuite:
         dtype2 = numpy.dtype(
             [('id', 'i8'),
              ('s', 'f4'),
+             ('vector', ('f4', 3)),
             ])
 
         data = numpy.empty(5, dtype=dtype)
