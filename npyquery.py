@@ -8,6 +8,10 @@ by other python database implementations as well.
 Override Column.visit for customized access to objects (e.g.
     Pandas dataframe or imaginglss's ColumnStore )
 
+Simple manipulation of the AST is allowed. For example, 
+:code:`node.assume(a, b)` allows one to replace 'a' with 'b'
+in the expression.
+
 Examples
 --------
 >>> d = dtype([
@@ -20,6 +24,9 @@ Examples
 >>> query  = (Column('BlackholeMass') > 2.0)
 >>> query &= (Column('BlackholeMass') > 4.0)
 >>> query &= (Column('Position')[:, 2] > 1.0)
+>>> print(query.visit(data))
+
+>>> query = query.assume(Column('BlackholeMass'), 1.0)
 >>> print(query.visit(data))
 
 """
@@ -139,6 +146,8 @@ class Node(object):
         return result
 
     def assume(self, node, literal):
+        """ Replace all subexpression 'node' with 'literal'.
+        """
         av = AssumptionVisitor(node, literal)
         rt = deepcopy(self)
         av.visit(rt)
@@ -364,7 +373,9 @@ class AssumptionVisitor(Visitor):
     def __init__(self, node, literal):
         Visitor.__init__(self)
         self.node = node
-        self.literal = Literal(literal)
+        if not isinstance(literal, Node):
+            literal = Literal(literal)
+        self.literal = literal
 
     def visit_node(self, node):
         newchildren = []
